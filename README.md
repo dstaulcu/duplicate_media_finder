@@ -61,4 +61,19 @@ sequenceDiagram
 
 ---
 
-*Code generation and automation for this project was assisted by [GitHub Copilot](https://github.com/features/copilot).*
+*Code generation and automation for this project was assisted by [GitHub Copilot](https://github.com/features/copilot).*  
+
+**Example Copilot Prompt to Build This Project from Scratch:**
+
+```
+Build a Streamlit app called "Duplicate Media Finder" that:
+- Scans all logical drives or user-specified folders for media files (images, videos, etc.)
+- Computes checksums (MD5) for each file
+- Detects and displays duplicate files
+- Allows users to preview images and basic info for videos
+- Lets users annotate duplicate file listings (not the files themselves) with actions like Keep, Delete, Move, Review, or Ignore Folder
+- Exports the annotations to a CSV file
+- Saves user settings (file types, skip folders) in a YAML file
+- Does not delete or modify files directly
+- Provides a modern, user-friendly UI with progress indicators and annotation tools
+```
