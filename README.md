@@ -12,6 +12,8 @@ This Streamlit app inventories all media files in selected drives or folders, co
 
 ## Quickstart
 
+> **Tip:** If you see an error that 'conda' is not installed or not in PATH, run the quickstart script from an Anaconda/Miniconda PowerShell prompt where 'conda' is available.
+
 1. Use the provided PowerShell script to set up your environment and launch the app:
    ```powershell
    .\quickstart.ps1
