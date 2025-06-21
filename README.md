@@ -1,13 +1,13 @@
 # Duplicate Media Finder
 
-This Streamlit app inventories all media files in selected drives or folders, computes checksums, and helps you reconcile duplicates. It now focuses on safe annotation and export, and no longer deletes files directly.
+This Streamlit app inventories all media files in selected drives or folders, computes checksums, and helps you reconcile duplicates. This app does not modify or delete your files. Instead, it allows you to annotate duplicate file listings (not the files themselves) for external review or action. All annotations are saved separately and can be exported for further processing.
 
 ## Features
 - Scan all logical drives or user-specified folders for media files (images, videos, etc.)
 - Compute MD5 checksums for each file
 - Detect and display duplicate files
 - Preview images and basic info for videos
-- Annotate files for external review or action (e.g., mark as Keep, Delete, Move, Review, Ignore Folder)
+- Annotate duplicate file listings for external review or action (e.g., mark as Keep, Delete, Move, Review, Ignore Folder)
 - Export annotations to CSV for further processing
 
 ## Quickstart
@@ -29,7 +29,6 @@ This Streamlit app inventories all media files in selected drives or folders, co
    ```
 
 ## Notes
-- The app no longer deletes files directly. Instead, you can annotate files for later action.
 - Scanning large drives or folders may take time.
 - Settings (file types, skip folders) are saved in `settings.yaml`.
 
@@ -49,7 +48,7 @@ sequenceDiagram
     User->>UI: Click "Find Duplicates"
     UI->>Engine: Compute checksums and group duplicates
     Engine-->>UI: Duplicate groups
-    User->>UI: Annotate files (Keep, Delete, Move, Review, Ignore Folder)
+    User->>UI: Annotate duplicate file listings (Keep, Delete, Move, Review, Ignore Folder)
     User->>UI: Export annotations to CSV
 ```
 
@@ -57,7 +56,9 @@ sequenceDiagram
 
 - Inventory media files from selected drives or folders
 - Find and review duplicate groups
-- Annotate each file for later action
+- Annotate each duplicate file listing for later action
 - Export your annotations for external review or scripting
 
 ---
+
+*Code generation and automation for this project was assisted by [GitHub Copilot](https://github.com/features/copilot).*
