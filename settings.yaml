@@ -1,0 +1,21 @@
+file_types:
+- .heic
+- .mp4
+- .bmp
+- .tiff
+- .avi
+- .jpeg
+- .mkv
+- .png
+- .mov
+- .jpg
+- .gif
+skip_folders:
+- C:\Windows
+- C:\Program Files
+- C:\Program Files (x86)
+- C:\ProgramData
+- C:\$Recycle.Bin
+- C:\System Volume Information
+- C:\Recovery
+- C:\PerfLogs

@@ -1,0 +1,4 @@
+streamlit
+pillow
+psutil
+send2trash
