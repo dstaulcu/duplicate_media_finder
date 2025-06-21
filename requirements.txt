@@ -2,3 +2,5 @@ streamlit
 pillow
 psutil
 send2trash
+pandas
+pyyaml

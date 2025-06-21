@@ -3,13 +3,18 @@
 # 2. Activate environment
 # 3. Install requirements
 # 4. Launch Streamlit app
+#
+# NOTE: If you see an error that 'conda' is not installed or not in PATH,
+# please run this script from an Anaconda/Miniconda PowerShell prompt where 'conda' is available.
 
 $envName = "duplicate_media_finder_env_p3.9"
 $pythonVersion = "3.9"
 
 # Check if conda is available
-if (-not (Get-Command conda -ErrorAction SilentlyContinue)) {
-    Write-Error "Conda is not installed or not in PATH. Please install Anaconda or Miniconda."
+try {
+    $condaCmd = Get-Command conda -ErrorAction Stop
+} catch {
+    Write-Error "Conda is not installed or not in PATH. Please install Anaconda or Miniconda and ensure 'conda' is available in your PATH. Alternatively, run this script from an Anaconda/Miniconda PowerShell prompt."
     exit 1
 }
 
