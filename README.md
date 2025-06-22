@@ -2,15 +2,25 @@
 
 A powerful Streamlit app for finding and managing duplicate media files across your system. This app inventories media files in selected drives or folders, uses multi-stage duplicate detection for fast performance, and provides an intuitive interface for annotating and managing duplicates. **The app never modifies your files directly** - it only helps you identify and annotate duplicates for external action.
 
+> **⚠️ IMPORTANT SAFETY UPDATE (v2.1.0)**: This version includes critical disk protection features to prevent drive disconnection during scanning. After real-world testing revealed that intensive scanning could cause external drives to go offline (potentially risking access to irreplaceable family photos), we've implemented disk-safe algorithms with intelligent throttling. Safe Mode is now the default to protect your precious data.
+
 ## ✨ Key Features
 
-### 🔍 **Smart Duplicate Detection**
+### �️ **Disk Safety & Drive Protection**
+- **Disk-safe scanning**: Prevents external drive disconnection during large scans
+- **Intelligent throttling**: Limits concurrent reads and adds micro-delays
+- **Always-on protection**: Safe scanning is the only mode to ensure data safety
+- **Real-time protection status**: Shows current disk safety settings
+- **External drive friendly**: Specifically designed for USB and network drives
+
+### �🔍 **Smart Duplicate Detection**
 - **Multi-stage detection**: Size → Quick hash → Full MD5 for optimal performance
-- **Fast scanning** of large media collections
+- **Fast scanning** of large media collections with drive protection
 - **Configurable file types** (images, videos, etc.)
 - **Intelligent skip patterns** with wildcard support
 
 ### 📊 **User-Friendly Interface**
+- **Forced dark mode**: Professional dark theme that works consistently
 - **Single-row selection** with clear visual indicators
 - **Enhanced table display** with text wrapping and read-only mode
 - **Intuitive annotation system** separate from file actions
@@ -64,7 +74,7 @@ streamlit run app.py
 ## 📋 Usage Workflow
 
 1. **Configure Settings**: Choose discovery mode (drives/folders) and adjust file types/skip patterns in the sidebar
-2. **Inventory Files**: Click "Inventory Media Files" to scan for media files
+2. **Inventory Files**: Click "Inventory Media Files" to scan for media files (with automatic drive protection)
 3. **Find Duplicates**: Click "Find Duplicates" to identify duplicate files using multi-stage detection
 4. **Review & Annotate**: Select files in the table and use the annotation dropdown to mark for future action
 5. **Take Action**: Use action buttons to open files, folders, or safely delete duplicates
@@ -87,11 +97,14 @@ The app includes intelligent defaults for common system and development folders:
 
 ## 🛡️ Safety Features
 
+- **Drive protection**: Disk-safe algorithms prevent external drive disconnection (always active)
+- **Intelligent throttling**: Reduced concurrent operations and micro-delays protect drives
 - **No direct file modification**: App only reads and analyzes files
 - **Confirmation dialogs**: Required for all destructive actions
 - **Annotation-only mode**: Mark files for action without immediate execution
 - **Session persistence**: Annotations saved across app restarts
-- **Error handling**: Graceful handling of file access issues
+- **Error handling**: Graceful handling of file access and drive disconnection issues
+- **Family photo safe**: Designed specifically to protect irreplaceable media collections
 
 ## 🎨 User Interface
 
@@ -198,6 +211,37 @@ duplicate_media_finder/
 ---
 
 ## 📋 Changelog
+
+### Version 2.1.0 - Critical Disk Safety & Dark Mode Fixes
+
+#### 🚨 **Critical Safety Updates**
+- **Disk-safe scanning**: Prevents drive overload that can cause external drives to disconnect
+- **Reduced concurrent reads**: Limited from 5+ to 2 simultaneous file operations
+- **Intelligent delays**: 50ms delays between operations and 10ms between file chunks
+- **Disk-friendly hash functions**: New `get_quick_hash_safe()` and `get_md5_safe()` with throttling
+- **Always-safe operation**: Removed risky fast mode - safety is now the only option
+
+#### 🌙 **User Experience Improvements**
+- **Forced dark mode**: Resolves light mode rendering issues with comprehensive dark theme CSS
+- **Simplified interface**: Removed confusing mode selection - protection is always active
+- **Real-time safety status**: Shows current disk protection settings
+- **Clear messaging**: Emphasizes family photo protection and drive safety
+- **Peace of mind**: No risk of accidentally choosing unsafe settings
+
+#### 🛡️ **Drive Protection Features**
+- **External drive protection**: Specifically designed to prevent family photo loss
+- **Gradual processing**: Spread operations over time instead of simultaneous hammering
+- **Error resilience**: Better handling of drive disconnection scenarios
+- **Performance monitoring**: Track disk stress without sacrificing functionality
+
+#### 📊 **Technical Enhancements**
+- **Throttled threading**: Lower thread pool workers for reduced disk contention
+- **Chunk-level delays**: Micro-delays during large file processing
+- **Safer defaults**: Conservative settings protect drives automatically
+- **No risk mode**: Eliminated potentially dangerous fast scanning option
+
+#### 🔧 **Background Context**
+This update was prompted by real-world testing where the app caused an external drive containing irreplaceable family photos to go offline during scanning. The new disk-safe algorithms prevent this scenario while maintaining duplicate detection effectiveness. Users can still choose faster scanning if their drives can handle it, but safety is now the default.
 
 ### Version 2.0.0 - Major UI and Performance Overhaul
 

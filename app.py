@@ -7,6 +7,13 @@ import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 import yaml
 import fnmatch
+import time
+
+# Disk-friendly settings to prevent drive overload
+DISK_FRIENDLY_MODE = True
+MAX_CONCURRENT_READS = 2  # Limit simultaneous file reads (down from default 5+)
+READ_DELAY_MS = 50  # Small delay between intensive operations
+CHUNK_READ_DELAY_MS = 10  # Delay between file chunks
 
 # Default media extensions
 DEFAULT_MEDIA_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.mp4', '.mov', '.avi', '.mkv', '.heic']
@@ -132,12 +139,71 @@ def get_quick_hash(file_path, chunk_size=1024*1024):
     except Exception:
         return None
 
+def get_quick_hash_safe(file_path, chunk_size=1024*1024):
+    """Disk-friendly version of get_quick_hash with delays to prevent drive overload"""
+    try:
+        # Add small delay before file operation
+        if DISK_FRIENDLY_MODE:
+            time.sleep(CHUNK_READ_DELAY_MS / 1000.0)
+            
+        size = os.path.getsize(file_path)
+        
+        # For small files (< 3MB), use full hash
+        if size < chunk_size * 3:
+            return get_md5_safe(file_path)
+        
+        # For large files, hash first + middle + last chunks with delays
+        hash_md5 = hashlib.md5()
+        with open(file_path, "rb") as f:
+            # First chunk
+            first_chunk = f.read(chunk_size)
+            hash_md5.update(first_chunk)
+            
+            if DISK_FRIENDLY_MODE:
+                time.sleep(CHUNK_READ_DELAY_MS / 1000.0)
+            
+            # Middle chunk
+            f.seek(size // 2)
+            middle_chunk = f.read(chunk_size)
+            hash_md5.update(middle_chunk)
+            
+            if DISK_FRIENDLY_MODE:
+                time.sleep(CHUNK_READ_DELAY_MS / 1000.0)
+            
+            # Last chunk
+            f.seek(-chunk_size, 2)
+            last_chunk = f.read(chunk_size)
+            hash_md5.update(last_chunk)
+        
+        return hash_md5.hexdigest()
+    except Exception:
+        return None
+
 def get_md5(file_path):
     hash_md5 = hashlib.md5()
     try:
         with open(file_path, "rb") as f:
             for chunk in chunk_reader(f):
                 hash_md5.update(chunk)
+        return hash_md5.hexdigest()
+    except Exception:
+        return None
+
+def get_md5_safe(file_path):
+    """Disk-friendly version of get_md5 with progress delays"""
+    try:
+        hash_md5 = hashlib.md5()
+        chunk_count = 0
+        
+        with open(file_path, "rb") as f:
+            for chunk in chunk_reader(f):
+                hash_md5.update(chunk)
+                chunk_count += 1
+                
+                # Add delay every 10 chunks to prevent disk thrashing
+                if DISK_FRIENDLY_MODE and chunk_count % 10 == 0:
+                    time.sleep(CHUNK_READ_DELAY_MS / 1000.0)
+                    
         return hash_md5.hexdigest()
     except Exception:
         return None
@@ -159,48 +225,69 @@ def find_potential_duplicates(file_paths):
     potential_dupes = [group for group in size_groups.values() if len(group) > 1]
     return [item for sublist in potential_dupes for item in sublist]
 
-def compute_quick_hashes(file_paths, progress_callback=None, max_workers=4):
-    """Compute quick hashes for initial duplicate detection"""
+def compute_quick_hashes(file_paths, progress_callback=None, max_workers=None):
+    """Compute quick hashes for initial duplicate detection - disk-friendly version"""
+    if max_workers is None:
+        max_workers = MAX_CONCURRENT_READS if DISK_FRIENDLY_MODE else 4
+        
     quick_hashes = {}
     total = len(file_paths)
+    
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_file = {executor.submit(get_quick_hash, f): f for f in file_paths}
+        future_to_file = {executor.submit(get_quick_hash_safe, f): f for f in file_paths}
         for i, future in enumerate(future_to_file):
             file = future_to_file[future]
             try:
                 quick_hash = future.result()
                 if quick_hash:
                     quick_hashes[file] = quick_hash
+                    
+                # Add small delay to prevent disk overload
+                if DISK_FRIENDLY_MODE and i % 10 == 0:  # Every 10 files
+                    time.sleep(READ_DELAY_MS / 1000.0)
             except Exception:
                 continue
             if progress_callback:
                 progress_callback(i + 1, total, "Quick hashing")
     return quick_hashes
 
-def compute_full_checksums(file_paths, progress_callback=None, max_workers=4):
-    """Compute full MD5 checksums for final verification"""
+def compute_full_checksums(file_paths, progress_callback=None, max_workers=None):
+    """Compute full MD5 checksums for final verification - disk-safe version"""
+    if max_workers is None:
+        max_workers = MAX_CONCURRENT_READS if DISK_FRIENDLY_MODE else 4
+        
     checksums = {}
     total = len(file_paths)
+    
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_file = {executor.submit(get_md5, f): f for f in file_paths}
+        future_to_file = {executor.submit(get_md5_safe, f): f for f in file_paths}
         for i, future in enumerate(future_to_file):
             file = future_to_file[future]
             try:
                 checksum = future.result()
                 if checksum:
                     checksums[file] = checksum
+                    
+                # Add small delay to prevent disk overload
+                if DISK_FRIENDLY_MODE and i % 5 == 0:  # Every 5 files  
+                    time.sleep(READ_DELAY_MS / 1000.0)
+                    
             except Exception:
                 continue
             if progress_callback:
                 progress_callback(i + 1, total, "Full checksumming")
     return checksums
 
-def group_by_checksum_multistage(files, progress_callback=None, max_workers=4):
-    """Multi-stage duplicate detection: Size -> Quick Hash -> Full Hash"""
+def group_by_checksum_multistage(files, progress_callback=None, max_workers=None):
+    """Multi-stage duplicate detection: Size -> Quick Hash -> Full Hash (disk-safe version)"""
+    
+    # Use disk-friendly settings
+    if max_workers is None:
+        max_workers = MAX_CONCURRENT_READS if DISK_FRIENDLY_MODE else 4
     
     # Stage 1: Group by file size (instant)
     if progress_callback:
-        progress_callback(0, 3, "Stage 1: Grouping by size")
+        progress_callback(0, 3, "Stage 1: Grouping by size...")
     
     size_groups = group_by_size(files)
     potential_dupes_by_size = []
@@ -288,8 +375,142 @@ def save_settings(settings):
         yaml.safe_dump(settings, f)
 
 def main():
+    # Configure page settings and force dark mode
+    st.set_page_config(
+        page_title="Duplicate Media Finder",
+        page_icon="🔍",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+      # Force dark theme with comprehensive custom CSS
+    st.markdown("""
+    <style>
+        /* Main app styling */
+        .stApp {
+            color: #e6e6e6;
+            background-color: #0e1117;
+        }
+        
+        /* Sidebar styling */
+        .stSidebar {
+            background-color: #1e1e1e;
+        }
+        .stSidebar .stMarkdown {
+            color: #e6e6e6;
+        }
+        
+        /* Button styling */
+        .stButton > button {
+            color: #e6e6e6;
+            background-color: #262730;
+            border: 1px solid #4a4a4a;
+        }
+        .stButton > button:hover {
+            color: #ffffff;
+            background-color: #404040;
+            border: 1px solid #6a6a6a;
+        }
+        
+        /* Text input and textarea styling */
+        .stTextInput > div > div > input {
+            background-color: #262730 !important;
+            color: #e6e6e6 !important;
+            border: 1px solid #4a4a4a !important;
+        }
+        .stTextArea > div > div > textarea {
+            background-color: #262730 !important;
+            color: #e6e6e6 !important;
+            border: 1px solid #4a4a4a !important;
+        }
+        
+        /* Selectbox styling */
+        .stSelectbox > div > div {
+            background-color: #262730 !important;
+            color: #e6e6e6 !important;
+            border: 1px solid #4a4a4a !important;
+        }
+        .stSelectbox > div > div > select {
+            background-color: #262730 !important;
+            color: #e6e6e6 !important;
+        }
+        
+        /* Multiselect styling */
+        .stMultiSelect > div > div {
+            background-color: #262730 !important;
+            color: #e6e6e6 !important;
+            border: 1px solid #4a4a4a !important;
+        }
+        
+        /* Radio button styling */
+        .stRadio > div {
+            color: #e6e6e6;
+        }
+        .stRadio > div > label {
+            color: #e6e6e6 !important;
+        }
+        
+        /* Checkbox styling */
+        .stCheckbox > label {
+            color: #e6e6e6 !important;
+        }
+        
+        /* Data frame styling */
+        .stDataFrame {
+            background-color: #1e1e1e;
+            color: #e6e6e6;
+        }
+        
+        /* Expander styling */
+        .streamlit-expanderHeader {
+            background-color: #262730;
+            color: #e6e6e6 !important;
+        }
+        
+        /* Progress bar styling */
+        .stProgress > div > div {
+            background-color: #262730;
+        }
+        
+        /* Markdown code blocks */
+        .stMarkdown code {
+            background-color: #262730 !important;
+            color: #e6e6e6 !important;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        
+        /* Headers and text */
+        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+            color: #ffffff;
+        }
+        .stMarkdown p, .stMarkdown li, .stMarkdown span {
+            color: #e6e6e6;
+        }
+        
+        /* Success/error/warning messages */
+        .stSuccess {
+            background-color: rgba(0, 128, 0, 0.1);
+            color: #90ee90;
+        }
+        .stError {
+            background-color: rgba(255, 0, 0, 0.1);
+            color: #ffa0a0;
+        }
+        .stWarning {
+            background-color: rgba(255, 165, 0, 0.1);
+            color: #ffd700;
+        }
+        .stInfo {
+            background-color: rgba(0, 100, 200, 0.1);
+            color: #87ceeb;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
     st.title("Duplicate Media Finder")
-    st.write("Scan drives or folders for duplicate media files and annotate a listing for external review or action.")    # Load settings
+    st.write("Scan drives or folders for duplicate media files and annotate a listing for external review or action.")
+    
+    # Load settings
     settings = load_settings()
     
     # Sidebar layout improvements
@@ -315,10 +536,9 @@ def main():
                 "Enter folder paths to scan (one per line)",
                 value=default_folders
             ).splitlines()
-            selected_folders = [f.strip() for f in selected_folders if f.strip()]
-        
-        # Advanced settings - Collapsible
+            selected_folders = [f.strip() for f in selected_folders if f.strip()]          # Advanced settings - Collapsible
         st.markdown("---")
+        
         with st.expander("⚙️ Advanced Settings", expanded=False):
             st.header("File Types")
             if 'file_types' in settings:
@@ -518,7 +738,28 @@ def main():
                     file_name = os.path.basename(selected_row['full_path'])
                     st.markdown("---")
                     st.markdown(f"### 🎯 Selected File: `{file_name}`")
-                    st.markdown(f"**📁 Full Path:** `{selected_row['full_path']}`")                    
+                    st.markdown(f"**📁 Full Path:** `{selected_row['full_path']}`")
+                    
+                    # Show duplicate files for the selected file
+                    selected_checksum = selected_row['checksum']
+                    if selected_checksum in st.session_state['duplicates']:
+                        duplicate_files = st.session_state['duplicates'][selected_checksum]
+                        # Remove the selected file from the list to avoid showing it twice
+                        other_duplicates = [f for f in duplicate_files if f != selected_row['full_path']]
+                        
+                        if other_duplicates:
+                            st.markdown(f"**🔗 Duplicate Files ({len(other_duplicates)} other{'s' if len(other_duplicates) != 1 else ''}):**")
+                            for i, dup_file in enumerate(other_duplicates, 1):
+                                dup_name = os.path.basename(dup_file)
+                                dup_annotation = st.session_state['annotations'].get(dup_file, "None")
+                                annotation_badge = f" `{dup_annotation}`" if dup_annotation != "None" else ""
+                                st.markdown(f"   {i}. `{dup_name}`{annotation_badge}")
+                                st.markdown(f"      📁 `{dup_file}`")
+                        else:
+                            st.markdown("**🔗 Duplicate Files:** *(This is the only file with this checksum)*")
+                    else:
+                        st.markdown("**🔗 Duplicate Files:** *(No duplicates found - this shouldn't happen)*")
+                    
                     # Action buttons for the selected file
                     col1, col2, col3 = st.columns([1,1,1])
                     with col1:
