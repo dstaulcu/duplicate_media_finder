@@ -1,4 +1,10 @@
 # Duplicate Media Finder
+- **2-stage default process**: Size → Quick hash (dramatically faster, drive-safe)
+- **Optional High Precision Mode**: Adds full MD5 stage for 100% certainty when needed
+- **Quick hash reliability**: Uses first + middle + last 1MB sampling (extremely reliable for media files)
+- **Configurable file types** (images, videos, etc.)
+- **Intelligent skip patterns** with wildcard support
+- **Performance first**: Minutes instead of hours for typical duplicate detectionnder
 
 A powerful Streamlit app for finding and managing duplicate media files across your system. This app inventories media files in selected drives or folders, uses multi-stage duplicate detection for fast performance, and provides an intuitive interface for annotating and managing duplicates. **The app never modifies your files directly** - it only helps you identify and annotate duplicates for external action.
 
@@ -19,12 +25,21 @@ A powerful Streamlit app for finding and managing duplicate media files across y
 - **Configurable file types** (images, videos, etc.)
 - **Intelligent skip patterns** with wildcard support
 
+### ⏸️ **Pause/Resume Functionality**
+- **Pausable scanning**: Pause long file scans and resume exactly where you left off
+- **State persistence**: Saves progress (files found, directories processed) across pause/resume
+- **Pausable duplicate detection**: Can interrupt checksum computation and continue later
+- **Dynamic controls**: Shows Pause/Resume/Cancel buttons based on current operation state
+- **No lost work**: All progress preserved when pausing - perfect for multi-hour scans
+
 ### 📊 **User-Friendly Interface**
-- **Forced dark mode**: Professional dark theme that works consistently
+- **Native theming**: Supports Light, Dark, and Auto themes via Streamlit's built-in system
 - **Single-row selection** with clear visual indicators
 - **Enhanced table display** with text wrapping and read-only mode
 - **Intuitive annotation system** separate from file actions
 - **Real-time progress indicators** during scanning
+- **Clear duplicate relationships**: Shows related duplicate files under selected file details
+- **Cross-browser compatibility** with consistent appearance
 
 ### 🎯 **Advanced File Management**
 - **Safe file deletion** with confirmation dialogs
@@ -33,13 +48,17 @@ A powerful Streamlit app for finding and managing duplicate media files across y
 - **Folder ignore functionality** with automatic skip list updates
 
 ### 📈 **Performance Optimized**
+- **Quick hash by default**: Dramatically faster duplicate detection (minutes vs hours)
+- **Optional precision mode**: Full MD5 available when 100% certainty needed
 - **Cached file operations** for faster annotation updates
 - **Efficient dataframe handling** with minimal reruns
 - **Background processing** for long-running operations
 - **Memory-efficient** duplicate detection algorithm
+- **Drive-friendly algorithms**: Minimal disk I/O prevents drive overload
 
 ### 🛠️ **Configuration & Export**
 - **YAML-based settings** with user-friendly sidebar controls
+- **High Precision Mode**: Optional full MD5 checksums for maximum accuracy
 - **One-click CSV export** of annotations
 - **Persistent annotations** across sessions
 - **Flexible skip patterns** for system and development folders
@@ -149,14 +168,21 @@ sequenceDiagram
     User->>UI: Click "Find Duplicates"
     UI->>Engine: Multi-stage duplicate detection
     Engine->>Engine: Stage 1: Group by file size
-    Engine->>Engine: Stage 2: Quick hash (first/middle/last chunks)
-    Engine->>Engine: Stage 3: Full MD5 hash (only for confirmed matches)
-    Engine-->>UI: Progress updates for each stage
+    Engine->>Engine: Stage 2: Quick hash (first/middle/last 1MB)
+    
+    alt High Precision Mode Enabled
+        Engine->>Engine: Stage 3: Full MD5 hash (100% accuracy)
+        Engine-->>UI: Progress: 3-stage process
+    else Quick Hash Mode (Default)
+        Engine->>Engine: Use quick hash as final result
+        Engine-->>UI: Progress: 2-stage process (much faster)
+    end
+    
     Engine-->>Cache: Cache checksums and duplicate groups
     Engine-->>UI: Duplicate groups with metadata
     
     User->>UI: Select file in table (single selection)
-    UI-->>User: Display selected file details
+    UI-->>User: Display selected file details and related duplicates
     User->>UI: Use action buttons (Open/Folder/Delete)
     User->>UI: Set annotation (Keep/Delete/Move/Review)
     UI-->>Cache: Update annotation cache
@@ -170,11 +196,13 @@ sequenceDiagram
 
 The app uses several optimization strategies for handling large media collections:
 
-- **Multi-stage duplicate detection**: Only computes expensive full hashes when necessary
+- **Optional multi-stage detection**: 2-stage quick hash by default, optional 3rd stage for 100% precision
+- **Quick hash reliability**: First + middle + last 1MB sampling provides excellent accuracy for media files
 - **Intelligent caching**: Reuses file sizes, checksums, and metadata across sessions
 - **Efficient table updates**: Minimal reruns when changing annotations
 - **Background processing**: Long operations don't block the UI
 - **Memory management**: Streams data instead of loading everything into memory
+- **Drive protection**: Minimal disk I/O prevents external drive disconnection
 
 ## 🔧 Development & Automation Scripts
 
@@ -211,6 +239,80 @@ duplicate_media_finder/
 ---
 
 ## 📋 Changelog
+
+### Version 2.3.0 - Optional Phase 3 & Performance Revolution
+
+#### 🚀 **Major Performance Enhancement**
+- **Phase 3 now optional**: Full MD5 checksums no longer computed by default
+- **Quick hash as final result**: Uses first + middle + last 1MB for extremely reliable duplicate detection
+- **Dramatic speed improvement**: Minutes instead of hours for large media collections
+- **Drive protection**: Eliminates disk-intensive Phase 3 that was causing drive stress
+- **Smart defaults**: Quick hash is highly reliable for media files (astronomically low false positive rate)
+
+#### ⚙️ **High Precision Mode (Optional)**
+- **Advanced setting**: Users can enable full MD5 checksums if desired
+- **100% certainty**: For users who need absolute duplicate verification
+- **Clear warnings**: Explains potential drive stress and time implications
+- **User choice**: Power users get maximum precision, typical users get speed and safety
+- **Intelligent defaults**: New users get the best experience without configuration
+
+#### 📊 **Updated Progress Reporting**
+- **2-stage default process**: Size grouping → Quick hash (much faster)
+- **3-stage precision mode**: Adds full MD5 when High Precision Mode enabled
+- **Clear indication**: Users know which mode is active during scanning
+- **Better estimates**: More accurate progress reporting for each mode
+
+#### 🎯 **User Experience Improvements**
+- **Informational messaging**: Explains quick hash reliability for media files
+- **Performance expectations**: Users know to expect fast results by default
+- **Configuration guidance**: Clear help text about when to use High Precision Mode
+- **Real-world optimization**: Based on actual user experience with drive overload issues
+
+#### 🛡️ **Technical Benefits**
+- **Minimal disk I/O**: Quick hash requires only 3MB sampling per file regardless of file size
+- **Thread efficiency**: Reduced concurrent operations prevent drive overload
+- **Memory optimization**: Less data processing and storage required
+- **Safer algorithms**: Default behavior protects external drives and family photo collections
+- **Future-proof**: Foundation for additional performance optimizations
+
+### Version 2.2.0 - Pause/Resume & Enhanced User Experience
+
+#### ⏸️ **Pause/Resume Functionality**
+- **Pausable file scanning**: Can pause and resume long scans without losing progress
+- **State persistence**: Saves scan progress (files found, directories processed) for seamless resuming  
+- **Pausable duplicate detection**: Can interrupt checksum computation and resume later
+- **Smart pause points**: Operations pause at safe points to prevent data corruption
+- **Thread cancellation**: Cleanly cancels pending file operations when paused
+- **Dynamic UI controls**: Shows appropriate buttons (Pause/Resume/Cancel) based on current state
+
+#### 🎨 **Theming & UI Improvements**
+- **Native theme support**: Removed custom CSS overrides for better cross-browser compatibility
+- **User theme choice**: Supports Light, Dark, and Auto themes via Streamlit's native system
+- **Enhanced duplicate display**: Shows list of related duplicate files under selected file details
+- **Better relationship visibility**: Makes duplicate file relationships clearer in busy results tables
+- **Cross-browser consistency**: No more white-text-on-white-background issues
+- **Accessibility improvements**: Proper contrast ratios with native theming
+
+#### 🔄 **Advanced State Management**
+- **Multi-state tracking**: Handles scanning, paused, resume, and cancel states
+- **Partial results display**: Shows progress even when operations are paused
+- **Resume from checkpoint**: Continues exactly where scanning left off
+- **Operation context**: Separate pause controls for file scanning vs duplicate detection
+- **Memory efficiency**: Preserves work without excessive memory usage
+
+#### 🎯 **User Experience Enhancements**
+- **Clear status messaging**: Users always know what's happening and what they can do
+- **Flexible workflow**: Can pause for system resources, other priorities, or breaks
+- **No lost work**: All progress is preserved when pausing operations
+- **Resource control**: Users can manage system load by pausing intensive operations
+- **Long-scan friendly**: Perfect for multi-hour scans of large media collections
+
+#### 🛠️ **Technical Improvements**
+- **Disk-safe pausing**: Respects disk-friendly delays even during pause operations  
+- **Future cancellation**: Prevents wasted CPU/disk on operations that will be cancelled
+- **Session state optimization**: Efficient tracking of complex application states
+- **Error resilience**: Handles pause/resume edge cases gracefully
+- **Clean architecture**: Separated pause logic from core scanning algorithms
 
 ### Version 2.1.0 - Critical Disk Safety & Dark Mode Fixes
 

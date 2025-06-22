@@ -1,18 +1,15 @@
 file_types:
-- .jpeg
+- .3g2
+- .mp4
 - .mov
+- .jpeg
+- .m4v
+- .heic
+- .avi
 - .bmp
 - .jpg
-- .mp4
-- .avi
-- .heic
-- .m4v
 - .3gp
-- .3g2
-- .webp
-- .tiff
-- .tif
-- .dng
+high_precision_mode: true
 skip_folders:
 - '*:\Windows'
 - '*:\Program Files*'

@@ -49,7 +49,7 @@ DEFAULT_SKIP_FOLDERS = [
 def get_logical_drives():
     return [part.mountpoint for part in psutil.disk_partitions() if os.name == 'nt']
 
-def find_media_files(drives, media_extensions, progress_callback=None, skip_folders=None):
+def find_media_files(drives, media_extensions, progress_callback=None, skip_folders=None, pause_check=None):
     if skip_folders is None:
         skip_folders = []
     
@@ -65,32 +65,55 @@ def find_media_files(drives, media_extensions, progress_callback=None, skip_fold
                 return True
         return False
     
-    media_files = []
-    total_dirs = 0
-    for drive in drives:
-        for root, dirs, files in os.walk(drive):
-            # Check if current directory should be skipped
-            if should_skip_folder(root, skip_folders):
-                dirs.clear()  # Don't traverse subdirectories
-                continue
-            total_dirs += 1
+    # Resume from previous scan if available
+    if 'scan_state' in st.session_state and st.session_state.get('scan_paused', False):
+        media_files = st.session_state['scan_state'].get('media_files', [])
+        processed_dirs = st.session_state['scan_state'].get('processed_dirs', 0)
+        total_dirs = st.session_state['scan_state'].get('total_dirs', 0)
+        remaining_walks = st.session_state['scan_state'].get('remaining_walks', [])
+    else:
+        media_files = []
+        processed_dirs = 0
+        
+        # First pass: count total directories
+        total_dirs = 0
+        remaining_walks = []
+        for drive in drives:
+            for root, dirs, files in os.walk(drive):
+                # Check if current directory should be skipped
+                if should_skip_folder(root, skip_folders):
+                    dirs.clear()  # Don't traverse subdirectories
+                    continue
+                total_dirs += 1
+                remaining_walks.append((root, dirs.copy(), files.copy()))
     
-    processed_dirs = 0
-    for drive in drives:
-        for root, dirs, files in os.walk(drive):
-            # Check if current directory should be skipped
-            if should_skip_folder(root, skip_folders):
-                dirs.clear()  # Don't traverse subdirectories
-                continue
-            
-            for file in files:
-                ext = os.path.splitext(file)[1].lower()
-                if ext in media_extensions:
-                    media_files.append(os.path.join(root, file))
-            processed_dirs += 1
-            if progress_callback:
-                progress_callback(processed_dirs, total_dirs)
-    return media_files
+    # Second pass: process files with pause support
+    for root, dirs, files in remaining_walks[processed_dirs:]:
+        # Check for pause request
+        if pause_check and pause_check():
+            # Save current state for resume
+            st.session_state['scan_state'] = {
+                'media_files': media_files,
+                'processed_dirs': processed_dirs,
+                'total_dirs': total_dirs,
+                'remaining_walks': remaining_walks
+            }
+            st.session_state['scan_paused'] = True
+            return media_files, False  # Return current results and not-complete flag
+        
+        for file in files:
+            ext = os.path.splitext(file)[1].lower()
+            if ext in media_extensions:
+                media_files.append(os.path.join(root, file))
+        processed_dirs += 1
+        if progress_callback:
+            progress_callback(processed_dirs, total_dirs)
+    
+    # Scan completed successfully
+    if 'scan_state' in st.session_state:
+        del st.session_state['scan_state']
+    st.session_state['scan_paused'] = False
+    return media_files, True  # Return results and complete flag
 
 def md5_checksum(file_path, chunk_size=8192):
     hash_md5 = hashlib.md5()
@@ -251,6 +274,40 @@ def compute_quick_hashes(file_paths, progress_callback=None, max_workers=None):
                 progress_callback(i + 1, total, "Quick hashing")
     return quick_hashes
 
+def compute_quick_hashes_pausable(file_paths, progress_callback=None, max_workers=None, pause_check=None):
+    """Compute quick hashes for initial duplicate detection with pause support - disk-friendly version"""
+    if max_workers is None:
+        max_workers = MAX_CONCURRENT_READS if DISK_FRIENDLY_MODE else 4
+        
+    quick_hashes = {}
+    total = len(file_paths)
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_file = {executor.submit(get_quick_hash_safe, f): f for f in file_paths}
+        for i, future in enumerate(future_to_file):
+            # Check for pause request
+            if pause_check and pause_check():
+                # Cancel remaining futures
+                for remaining_future in future_to_file:
+                    if not remaining_future.done():
+                        remaining_future.cancel()
+                break
+                
+            file = future_to_file[future]
+            try:
+                quick_hash = future.result()
+                if quick_hash:
+                    quick_hashes[file] = quick_hash
+                    
+                # Add small delay to prevent disk overload
+                if DISK_FRIENDLY_MODE and i % 10 == 0:  # Every 10 files
+                    time.sleep(READ_DELAY_MS / 1000.0)
+            except Exception:
+                continue
+            if progress_callback:
+                progress_callback(i + 1, total, "Quick hashing")
+    return quick_hashes
+
 def compute_full_checksums(file_paths, progress_callback=None, max_workers=None):
     """Compute full MD5 checksums for final verification - disk-safe version"""
     if max_workers is None:
@@ -278,16 +335,66 @@ def compute_full_checksums(file_paths, progress_callback=None, max_workers=None)
                 progress_callback(i + 1, total, "Full checksumming")
     return checksums
 
-def group_by_checksum_multistage(files, progress_callback=None, max_workers=None):
-    """Multi-stage duplicate detection: Size -> Quick Hash -> Full Hash (disk-safe version)"""
+def compute_full_checksums_pausable(file_paths, progress_callback=None, max_workers=None, pause_check=None):
+    """Compute full MD5 checksums for final verification with pause support - disk-safe version"""
+    if max_workers is None:
+        max_workers = MAX_CONCURRENT_READS if DISK_FRIENDLY_MODE else 4
+        
+    checksums = {}
+    total = len(file_paths)
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_file = {executor.submit(get_md5_safe, f): f for f in file_paths}
+        for i, future in enumerate(future_to_file):
+            # Check for pause request
+            if pause_check and pause_check():
+                # Cancel remaining futures
+                for remaining_future in future_to_file:
+                    if not remaining_future.done():
+                        remaining_future.cancel()
+                break
+                
+            file = future_to_file[future]
+            try:
+                checksum = future.result()
+                if checksum:
+                    checksums[file] = checksum
+                    
+                # Add small delay to prevent disk overload
+                if DISK_FRIENDLY_MODE and i % 5 == 0:  # Every 5 files  
+                    time.sleep(READ_DELAY_MS / 1000.0)
+                    
+            except Exception:
+                continue
+            if progress_callback:
+                progress_callback(i + 1, total, "Full checksumming")
+    return checksums
+
+def group_by_checksum_multistage(files, progress_callback=None, max_workers=None, pause_check=None, high_precision_mode=False):
+    """Multi-stage duplicate detection: Size -> Quick Hash -> Full Hash (disk-safe version)
+    
+    Args:
+        files: List of file paths to check for duplicates
+        progress_callback: Function to report progress
+        max_workers: Maximum number of concurrent threads
+        pause_check: Function that returns True if operation should pause
+        high_precision_mode: If True, performs full MD5; if False, uses quick hash only
+    """
     
     # Use disk-friendly settings
     if max_workers is None:
         max_workers = MAX_CONCURRENT_READS if DISK_FRIENDLY_MODE else 4
     
+    # Adjust progress stages based on precision mode
+    total_stages = 3 if high_precision_mode else 2
+    
+    # Check for pause before starting
+    if pause_check and pause_check():
+        return {}
+    
     # Stage 1: Group by file size (instant)
     if progress_callback:
-        progress_callback(0, 3, "Stage 1: Grouping by size...")
+        progress_callback(0, total_stages, "Stage 1: Grouping by size...")
     
     size_groups = group_by_size(files)
     potential_dupes_by_size = []
@@ -299,19 +406,26 @@ def group_by_checksum_multistage(files, progress_callback=None, max_workers=None
         return {}
     
     if progress_callback:
-        progress_callback(1, 3, f"Stage 1 complete: {len(potential_dupes_by_size)} potential duplicates by size")
+        progress_callback(1, total_stages, f"Stage 1 complete: {len(potential_dupes_by_size)} potential duplicates by size")
+    
+    # Check for pause after stage 1
+    if pause_check and pause_check():
+        return {}
     
     # Stage 2: Quick hash for size-matched files
     if progress_callback:
-        progress_callback(1, 3, "Stage 2: Computing quick hashes")
+        progress_callback(1, total_stages, "Stage 2: Computing quick hashes")
     
     def quick_progress(done, total, stage):
         if progress_callback:
-            progress_callback(1 + (done/total), 3, f"Stage 2: Quick hashing {done}/{total}")
+            progress_callback(1 + (done/total), total_stages, f"Stage 2: Quick hashing {done}/{total}")
     
-    quick_hashes = compute_quick_hashes(potential_dupes_by_size, quick_progress, max_workers)
+    quick_hashes = compute_quick_hashes_pausable(potential_dupes_by_size, quick_progress, max_workers, pause_check)
     
-    # Group by quick hash
+    # Check if paused during quick hashing
+    if pause_check and pause_check():
+        return {}
+      # Group by quick hash
     quick_hash_groups = {}
     for file, quick_hash in quick_hashes.items():
         quick_hash_groups.setdefault(quick_hash, []).append(file)
@@ -326,28 +440,41 @@ def group_by_checksum_multistage(files, progress_callback=None, max_workers=None
         return {}
     
     if progress_callback:
-        progress_callback(2, 3, f"Stage 2 complete: {len(final_candidates)} candidates need full checksums")
+        progress_callback(2, total_stages, f"Stage 2 complete: {len(final_candidates)} candidates found")
     
-    # Stage 3: Full MD5 for quick-hash-matched files only
-    if progress_callback:
-        progress_callback(2, 3, "Stage 3: Computing full checksums")
+    # Check for pause after stage 2
+    if pause_check and pause_check():
+        return {}
     
-    def full_progress(done, total, stage):
+    # Stage 3: Full MD5 (only if high precision mode is enabled)
+    if high_precision_mode:
         if progress_callback:
-            progress_callback(2 + (done/total), 3, f"Stage 3: Full checksumming {done}/{total}")
-    
-    full_checksums = compute_full_checksums(final_candidates, full_progress, max_workers)
-    
-    # Final grouping by full checksum
-    checksum_map = {}
-    for file, checksum in full_checksums.items():
-        checksum_map.setdefault(checksum, []).append(file)
+            progress_callback(2, total_stages, "Stage 3: Computing full checksums")
+        
+        def full_progress(done, total, stage):
+            if progress_callback:
+                progress_callback(2 + (done/total), total_stages, f"Stage 3: Full checksumming {done}/{total}")
+        
+        full_checksums = compute_full_checksums_pausable(final_candidates, full_progress, max_workers, pause_check)
+        
+        # Check if paused during full checksumming
+        if pause_check and pause_check():
+            return {}
+        
+        # Final grouping by full checksum
+        checksum_map = {}
+        for file, checksum in full_checksums.items():
+            checksum_map.setdefault(checksum, []).append(file)
+    else:
+        # Use quick hash as final result (much faster, still very reliable for media files)
+        checksum_map = quick_hash_groups
     
     result = {k: v for k, v in checksum_map.items() if len(v) > 1}
     
     if progress_callback:
         total_duplicates = sum(len(v) for v in result.values())
-        progress_callback(3, 3, f"Complete: Found {total_duplicates} duplicate files")
+        mode_desc = "High Precision" if high_precision_mode else "Quick Hash"
+        progress_callback(total_stages, total_stages, f"Complete: Found {total_duplicates} duplicate files ({mode_desc} mode)")
     
     return result
 
@@ -375,137 +502,13 @@ def save_settings(settings):
         yaml.safe_dump(settings, f)
 
 def main():
-    # Configure page settings and force dark mode
+    # Configure page settings
     st.set_page_config(
         page_title="Duplicate Media Finder",
         page_icon="🔍",
         layout="wide",
         initial_sidebar_state="expanded"
     )
-      # Force dark theme with comprehensive custom CSS
-    st.markdown("""
-    <style>
-        /* Main app styling */
-        .stApp {
-            color: #e6e6e6;
-            background-color: #0e1117;
-        }
-        
-        /* Sidebar styling */
-        .stSidebar {
-            background-color: #1e1e1e;
-        }
-        .stSidebar .stMarkdown {
-            color: #e6e6e6;
-        }
-        
-        /* Button styling */
-        .stButton > button {
-            color: #e6e6e6;
-            background-color: #262730;
-            border: 1px solid #4a4a4a;
-        }
-        .stButton > button:hover {
-            color: #ffffff;
-            background-color: #404040;
-            border: 1px solid #6a6a6a;
-        }
-        
-        /* Text input and textarea styling */
-        .stTextInput > div > div > input {
-            background-color: #262730 !important;
-            color: #e6e6e6 !important;
-            border: 1px solid #4a4a4a !important;
-        }
-        .stTextArea > div > div > textarea {
-            background-color: #262730 !important;
-            color: #e6e6e6 !important;
-            border: 1px solid #4a4a4a !important;
-        }
-        
-        /* Selectbox styling */
-        .stSelectbox > div > div {
-            background-color: #262730 !important;
-            color: #e6e6e6 !important;
-            border: 1px solid #4a4a4a !important;
-        }
-        .stSelectbox > div > div > select {
-            background-color: #262730 !important;
-            color: #e6e6e6 !important;
-        }
-        
-        /* Multiselect styling */
-        .stMultiSelect > div > div {
-            background-color: #262730 !important;
-            color: #e6e6e6 !important;
-            border: 1px solid #4a4a4a !important;
-        }
-        
-        /* Radio button styling */
-        .stRadio > div {
-            color: #e6e6e6;
-        }
-        .stRadio > div > label {
-            color: #e6e6e6 !important;
-        }
-        
-        /* Checkbox styling */
-        .stCheckbox > label {
-            color: #e6e6e6 !important;
-        }
-        
-        /* Data frame styling */
-        .stDataFrame {
-            background-color: #1e1e1e;
-            color: #e6e6e6;
-        }
-        
-        /* Expander styling */
-        .streamlit-expanderHeader {
-            background-color: #262730;
-            color: #e6e6e6 !important;
-        }
-        
-        /* Progress bar styling */
-        .stProgress > div > div {
-            background-color: #262730;
-        }
-        
-        /* Markdown code blocks */
-        .stMarkdown code {
-            background-color: #262730 !important;
-            color: #e6e6e6 !important;
-            padding: 2px 4px;
-            border-radius: 3px;
-        }
-        
-        /* Headers and text */
-        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
-            color: #ffffff;
-        }
-        .stMarkdown p, .stMarkdown li, .stMarkdown span {
-            color: #e6e6e6;
-        }
-        
-        /* Success/error/warning messages */
-        .stSuccess {
-            background-color: rgba(0, 128, 0, 0.1);
-            color: #90ee90;
-        }
-        .stError {
-            background-color: rgba(255, 0, 0, 0.1);
-            color: #ffa0a0;
-        }
-        .stWarning {
-            background-color: rgba(255, 165, 0, 0.1);
-            color: #ffd700;
-        }
-        .stInfo {
-            background-color: rgba(0, 100, 200, 0.1);
-            color: #87ceeb;
-        }
-    </style>
-    """, unsafe_allow_html=True)
     
     st.title("Duplicate Media Finder")
     st.write("Scan drives or folders for duplicate media files and annotate a listing for external review or action.")
@@ -559,66 +562,185 @@ def main():
             skip_folders_input = st.text_area(
                 "Skip these folders (one per line, wildcards supported)",
                 value=default_skip_folders,
-                help="Examples: C:\\Users\\*\\AppData, *\\node_modules, C:\\Program Files*"
-            )
+                help="Examples: C:\\Users\\*\\AppData, *\\node_modules, C:\\Program Files*"            )
             skip_folders = [f.strip() for f in skip_folders_input.splitlines() if f.strip()]
+            
+            st.markdown("---")
+            st.header("Duplicate Detection Mode")
+            
+            # High Precision Mode setting
+            high_precision = st.checkbox(
+                "🎯 High Precision Mode (Full MD5)",
+                value=settings.get('high_precision_mode', False),
+                help="Enable full MD5 checksums for 100% accuracy. ⚠️ WARNING: This can take much longer and may stress drives with large collections."
+            )
+            
+            if not high_precision:
+                st.info("ℹ️ **Quick Hash Mode** (Default): Uses first + middle + last 1MB of each file. Extremely reliable for media files with dramatically faster performance.")
+            else:
+                st.warning("⚠️ **High Precision Mode**: Computes full MD5 checksums. Provides 100% certainty but may take hours and stress drives with large video collections.")
         
         st.markdown("---")
         st.header("🚀 Actions")
-        inventory_clicked = st.button("Inventory Media Files", type="primary")
-    
-    # Save settings if changed
+        
+        # Show appropriate buttons based on scan state
+        if st.session_state.get('scan_paused', False):
+            col1, col2 = st.columns(2)
+            with col1:
+                resume_clicked = st.button("▶️ Resume Scan", type="primary")
+            with col2:
+                cancel_clicked = st.button("❌ Cancel Scan", type="secondary")
+        elif st.session_state.get('scanning', False):
+            pause_clicked = st.button("⏸️ Pause Scan", type="secondary")
+        else:
+            inventory_clicked = st.button("📁 Inventory Media Files", type="primary")
+      # Save settings if changed
     if (set(media_extensions) != set(settings.get('file_types', [])) or 
-        skip_folders != settings.get('skip_folders', [])):
+        skip_folders != settings.get('skip_folders', []) or
+        high_precision != settings.get('high_precision_mode', False)):
         settings['file_types'] = list(media_extensions)
         settings['skip_folders'] = skip_folders
-        settings['skip_folders'] = skip_folders
-        save_settings(settings)
-
-    # Inventory
-    if inventory_clicked:
-        # Clear prior results from session state and show a placeholder while scanning
+        settings['high_precision_mode'] = high_precision
+        save_settings(settings)# Handle pause/resume/cancel logic
+    if st.session_state.get('scan_paused', False):
+        # Resume scan
+        if 'resume_clicked' in locals() and resume_clicked:
+            st.session_state['scanning'] = True
+            st.session_state['scan_paused'] = False
+            st.rerun()
+        # Cancel scan
+        elif 'cancel_clicked' in locals() and cancel_clicked:
+            if 'scan_state' in st.session_state:
+                del st.session_state['scan_state']
+            st.session_state['scan_paused'] = False
+            st.session_state['scanning'] = False
+            st.success("Scan cancelled.")
+            st.rerun()
+    
+    # Handle pause request during scanning
+    if st.session_state.get('scanning', False) and 'pause_clicked' in locals() and pause_clicked:
+        st.session_state['scan_pause_requested'] = True
+        st.info("Pause requested. Scan will pause at the next safe point...")
+    
+    # Inventory - Start new scan
+    if 'inventory_clicked' in locals() and inventory_clicked:
+        # Clear prior results from session state
         st.session_state['media_files'] = []
         st.session_state['duplicates'] = {}
         st.session_state['annotations'] = {}
         st.session_state['scanning'] = True
-        st.info("Scanning in progress. Results will appear when complete.")
+        st.session_state['scan_paused'] = False
+        st.session_state['scan_pause_requested'] = False
+        if 'scan_state' in st.session_state:
+            del st.session_state['scan_state']
+        
         if mode == "Drives" and not selected_drives:
+            st.session_state['scanning'] = False
             st.warning("Please select at least one drive.")
         elif mode == "Folders" and not selected_folders:
+            st.session_state['scanning'] = False
             st.warning("Please enter at least one folder path.")
         else:
-            with st.spinner("Scanning for media files..."):
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                def progress_callback(done, total):
-                    progress_bar.progress(min(done / total, 1.0))
-                    status_text.text(f"Scanning folder {done} of {total}")
-                scan_targets = selected_drives if mode == "Drives" else selected_folders
-                files = find_media_files(scan_targets, media_extensions, progress_callback, skip_folders)
+            st.rerun()  # Refresh to show scanning state
+    
+    # Active scanning process
+    if st.session_state.get('scanning', False) and not st.session_state.get('scan_paused', False):
+        st.info("🔍 Scanning in progress... Use the pause button in the sidebar to pause.")
+        
+        with st.spinner("Scanning for media files..."):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            def progress_callback(done, total):
+                progress_bar.progress(min(done / total, 1.0))
+                status_text.text(f"Scanning folder {done} of {total}")
+            
+            def pause_check():
+                return st.session_state.get('scan_pause_requested', False)
+            
+            scan_targets = selected_drives if mode == "Drives" else selected_folders
+            result = find_media_files(scan_targets, media_extensions, progress_callback, skip_folders, pause_check)
+            
+            if isinstance(result, tuple):
+                files, scan_complete = result
+            else:
+                files, scan_complete = result, True
+            
+            if scan_complete:
                 st.session_state['media_files'] = files
                 st.session_state['scanning'] = False
+                st.session_state['scan_paused'] = False
                 progress_bar.empty()
-                status_text.text(f"Found {len(files)} media files.")
-                st.success(f"Found {len(files)} media files.")    # Find duplicates
-    if 'media_files' in st.session_state:
-        if st.button("Find Duplicates"):
+                status_text.empty()
+                st.success(f"✅ Scan complete! Found {len(files)} media files.")
+                st.rerun()
+            else:
+                # Scan was paused
+                st.session_state['media_files'] = files  # Save partial results
+                st.session_state['scanning'] = False
+                st.session_state['scan_paused'] = True
+                st.session_state['scan_pause_requested'] = False
+                progress_bar.empty()
+                status_text.empty()
+                st.warning(f"⏸️ Scan paused. Found {len(files)} files so far. Use Resume to continue.")
+                st.rerun()    # Find duplicates
+    if 'media_files' in st.session_state and len(st.session_state['media_files']) > 0:
+        if not st.session_state.get('scanning', False) and not st.session_state.get('scan_paused', False):
+            if st.button("🔍 Find Duplicates"):
+                st.session_state['duplicate_scanning'] = True
+                st.session_state['duplicate_pause_requested'] = False
+                st.rerun()
+          # Handle duplicate scanning pause request
+        if st.session_state.get('duplicate_scanning', False):
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                if st.button("⏸️ Pause Duplicate Detection"):
+                    st.session_state['duplicate_pause_requested'] = True
+                    st.info("Pause requested. Will pause at the next safe point...")
+            
             with st.spinner("Calculating checksums and finding duplicates..."):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+                
                 def progress_callback(done, total, message="Processing"):
                     progress_bar.progress(min(done / total, 1.0))
                     status_text.text(message)
-                dupes = group_by_checksum_multistage(st.session_state['media_files'], progress_callback, max_workers=8)
-                st.session_state['duplicates'] = dupes
-                st.session_state['annotations'] = {}
-                progress_bar.empty()
-                status_text.text(f"Found {sum(len(v) for v in dupes.values())} duplicate files.")
-                st.success(f"Found {sum(len(v) for v in dupes.values())} duplicate files.")
+                
+                def pause_check():
+                    return st.session_state.get('duplicate_pause_requested', False)
+                
+                dupes = group_by_checksum_multistage(
+                    st.session_state['media_files'], 
+                    progress_callback, 
+                    max_workers=8, 
+                    pause_check=pause_check,
+                    high_precision_mode=settings.get('high_precision_mode', False)
+                )
+                
+                if st.session_state.get('duplicate_pause_requested', False):
+                    st.session_state['duplicate_scanning'] = False
+                    st.session_state['duplicate_pause_requested'] = False
+                    progress_bar.empty()
+                    status_text.empty()
+                    st.warning("⏸️ Duplicate detection paused. Click 'Find Duplicates' to restart.")
+                else:
+                    st.session_state['duplicates'] = dupes
+                    st.session_state['annotations'] = {}
+                    st.session_state['duplicate_scanning'] = False
+                    progress_bar.empty()
+                    status_text.empty()
+                    total_duplicates = sum(len(v) for v in dupes.values())
+                    st.success(f"✅ Found {total_duplicates} duplicate files.")
+                
+                st.rerun()
 
     # Only show results if there are any and not scanning
-    if st.session_state.get('media_files') and len(st.session_state['media_files']) > 0 and not st.session_state.get('scanning', False):
-        # Annotate and export with table view        if 'duplicates' in st.session_state:
+    if (st.session_state.get('media_files') and 
+        len(st.session_state['media_files']) > 0 and 
+        not st.session_state.get('scanning', False) and 
+        not st.session_state.get('duplicate_scanning', False)):
+        
+        if 'duplicates' in st.session_state:
             st.header("Duplicate Groups Table View")
               # Build table data with caching to improve performance
             cache_key = f"table_data_{len(st.session_state['duplicates'])}"
