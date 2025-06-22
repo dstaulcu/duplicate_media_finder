@@ -1,21 +1,43 @@
 file_types:
-- .heic
-- .mp4
-- .bmp
-- .tiff
-- .avi
 - .jpeg
-- .mkv
-- .png
 - .mov
+- .bmp
 - .jpg
-- .gif
+- .mp4
+- .avi
+- .heic
+- .m4v
+- .3gp
+- .3g2
+- .webp
+- .tiff
+- .tif
+- .dng
 skip_folders:
-- C:\Windows
-- C:\Program Files
-- C:\Program Files (x86)
-- C:\ProgramData
-- C:\$Recycle.Bin
-- C:\System Volume Information
-- C:\Recovery
-- C:\PerfLogs
+- '*:\Windows'
+- '*:\Program Files*'
+- '*:\ProgramData'
+- '*:\$Recycle.Bin'
+- '*:\System Volume Information'
+- '*:\Recovery'
+- '*:\PerfLogs'
+- '*:\Apps'
+- '*:\Users\*\AppData'
+- '*\node_modules'
+- '*\.git'
+- '*\.svn'
+- '*\.hg'
+- '*\__pycache__'
+- '*\.vscode'
+- '*\.idea'
+- '*\temp'
+- '*\tmp'
+- '*\cache'
+- '*\logs'
+- '*\images'
+- '*\pkgs'
+- '*\envs'
+- '*\.conda'
+- '*\Lib'
+- '*\.nuget'
+- '*\packages'
